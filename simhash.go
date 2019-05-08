@@ -11,8 +11,15 @@ type hashTableKey []uint8
 
 // Point represents an abstract point in n-dimensional space
 type Point struct {
-	Vector []float64
-	ID     string
+	Vector    []float64
+	ExtraData string
+	ID        uint64
+}
+
+// QueryResult represent query result with distance to query point
+type QueryResult struct {
+	Point
+	Distance float64
 }
 
 // Value is an index into the input dataset.

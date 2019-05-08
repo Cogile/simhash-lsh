@@ -6,7 +6,35 @@ import (
 	"math/rand"
 	"strconv"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestSimpleQuery(t *testing.T) {
+	lsh := NewCosineLsh(8, 1, 6)
+	lsh.Insert([]float64{1, 2, 3, 4, 5, 6, 7, 8}, "1")
+	lsh.Insert([]float64{2, 3, 4, 5, 6, 7, 8, 9}, "2")
+	lsh.Insert([]float64{10, 12, 99, 1, 5, 31, 2, 3}, "3")
+	res := lsh.Query([]float64{1, 2, 3, 4, 5, 6, 7, 7}, -1)
+
+	require.Len(t, res, 2)
+
+	assert.Equal(t, float64(1), res[0].Distance)
+	assert.Equal(t, float64(11), res[1].Distance)
+}
+
+func TestSimpleQueryWithMaxResult(t *testing.T) {
+	lsh := NewCosineLsh(8, 1, 6)
+	for i := 0; i < 10; i++ {
+		lsh.Insert([]float64{1, 2, 3, 4, 5, 6, 7, 8}, strconv.Itoa(i))
+	}
+	res := lsh.Query([]float64{1, 2, 3, 4, 5, 6, 7, 7}, -1)
+	require.Len(t, res, 10)
+
+	res = lsh.Query([]float64{1, 2, 3, 4, 5, 6, 7, 7}, 5)
+	require.Len(t, res, 5)
+}
 
 func Test_CosineLshQuery(t *testing.T) {
 	ls := []int{20, 5, 10, 25, 4}
@@ -24,11 +52,11 @@ func Test_CosineLshQuery(t *testing.T) {
 		// verify that we can get back each query itself
 		log.Printf("avg number of returned results with k=%d and l=%d for each query (out of %d indexed items): ", ks[j], ls[j], len(embs))
 		for i, key := range insertedEmbs {
-			results := clsh.Query(embs[i])
+			results := clsh.Query(embs[i], -1)
 			avg += float64(len(results))
 			found := false
 			for _, foundKey := range results {
-				if foundKey.ID == key {
+				if foundKey.ExtraData == key {
 					found = true
 				}
 			}
@@ -56,7 +84,7 @@ func Test_CosineLshQueryShouldBeSortedByL2(t *testing.T) {
 		// verify that we can get back each query itself
 		log.Printf("avg number of returned results with k=%d and l=%d for each query (out of %d indexed items): ", ks[j], ls[j], len(embs))
 		for i := range insertedEmbs {
-			results := clsh.Query(embs[i])
+			results := clsh.Query(embs[i], -1)
 			var lastDistance float64
 			avg += float64(len(results))
 			//
@@ -94,7 +122,7 @@ func BenchmarkCosineLshQueryNaive(b *testing.B) {
 	}
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
-		lsh.Query(embs[0])
+		lsh.Query(embs[0], -1)
 	}
 }
 

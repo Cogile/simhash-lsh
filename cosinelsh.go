@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 )
 
 // DistanceFunc is a function for calculate distance between two vectors
@@ -65,6 +66,8 @@ type CosineLsh struct {
 	*cosineLshParam
 	// Tables
 	tables []hashTable
+	//
+	nextID uint64
 }
 
 // NewCosineLsh created an instance of Cosine LSH.
@@ -86,7 +89,7 @@ func NewCosineLsh(dim, l, m int) *CosineLsh {
 // Insert adds a new data point to the Cosine LSH.
 // point is a data point being inserted into the index and
 // id is the unique identifier for the data point.
-func (index *CosineLsh) Insert(point []float64, id string) {
+func (index *CosineLsh) Insert(point []float64, extraData string) {
 	// Apply hash functions
 	hvs := index.toBasicHashTableKeys(index.hash(point))
 	// Insert key into all hash tables
@@ -99,25 +102,21 @@ func (index *CosineLsh) Insert(point []float64, id string) {
 			if _, exist := table[hv]; !exist {
 				table[hv] = make(hashTableBucket, 0)
 			}
-			table[hv] = append(table[hv], Point{Vector: point, ID: id})
+			vectorID := atomic.AddUint64(&index.nextID, 1)
+			table[hv] = append(table[hv], Point{Vector: point, ID: vectorID, ExtraData: extraData})
 			wg.Done()
 		}(table, hv)
 	}
 	wg.Wait()
 }
 
-type distanceTuple struct {
-	id   string
-	dist float64
-}
-
 // Query finds the ids of approximate nearest neighbour candidates,
 // in un-sorted order, given the query point.
-func (index *CosineLsh) Query(q []float64) []Point {
+func (index *CosineLsh) Query(q []float64, maxResult int) []QueryResult {
 	// Apply hash functions
 	hvs := index.toBasicHashTableKeys(index.hash(q))
 	// Keep track of keys seen
-	seen := make(map[string]Point)
+	seen := make(map[uint64]Point)
 	for i, table := range index.tables {
 		if candidates, exist := table[hvs[i]]; exist {
 			for _, id := range candidates {
@@ -129,23 +128,25 @@ func (index *CosineLsh) Query(q []float64) []Point {
 		}
 	}
 
-	distances := make([]distanceTuple, 0, len(seen))
+	distances := make([]QueryResult, 0, len(seen))
 	// is it matrix on vector multiplication?
-	for key, value := range seen {
+	for _, value := range seen {
 		dist := index.dFunc(q, value.Vector)
-		distances = append(distances, distanceTuple{id: key, dist: dist})
+		queryResult := QueryResult{Distance: dist}
+		queryResult.Vector = value.Vector
+		queryResult.ID = value.ID
+		queryResult.ExtraData = value.ExtraData
+		distances = append(distances, queryResult)
 	}
 	sort.Slice(distances, func(i, j int) bool {
-		return distances[i].dist < distances[j].dist
+		return distances[i].Distance < distances[j].Distance
 	})
 
-	// Collect results
-	values := make([]Point, 0, len(seen))
-	for _, distProduct := range distances {
-		values = append(values, seen[distProduct.id])
+	if maxResult > 0 && len(distances) > maxResult {
+		return distances[:maxResult]
 	}
 
-	return values
+	return distances
 }
 
 func (index *CosineLsh) toBasicHashTableKeys(keys []hashTableKey) []uint64 {
